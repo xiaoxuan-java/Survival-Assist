@@ -29,9 +29,13 @@ public class HealthDisplayFeature {
     /**
      * 在世界渲染阶段绘制头顶血条。
      *
-     * 血条使用与文字背景完全相同的渲染层 RenderLayer.getTextBackground()，
-     * 与文字（textRenderer.draw 内部走的 TEXT 层）一起提交到同一个 consumers、
-     * 统一 flush、同一深度行为，真正做到"血条与文字在同一个图层"。
+     * 血条使用 RenderLayer.getDebugQuads()：该层的顶点格式是 POSITION_COLOR
+     * （位置 + 颜色，无光照/纹理元素），DrawMode 为 QUADS，并启用了
+     * TRANSLUCENT_TRANSPARENCY，正好满足"手绘彩色四边形 + 支持半透明"的需求。
+     *
+     * 注意：不要用 RenderLayer.getTextBackground()。它的顶点格式是
+     * POSITION_COLOR_LIGHT（多一个 UV2/light 元素），一旦漏写 light 或顺序不对，
+     * BufferBuilder.next() 就会抛 "Not filled all elements of the vertex" 并崩溃。
      */
     public static void render(WorldRenderContext context) {
         ModConfig cfg = ModConfig.get();
@@ -60,8 +64,8 @@ public class HealthDisplayFeature {
         EntityRenderDispatcher dispatcher = client.getEntityRenderDispatcher();
         TextRenderer textRenderer = client.textRenderer;
 
-        // 血条图层：与文字背景同一层（TEXT_BACKGROUND）
-        VertexConsumer bar = consumers.getBuffer(RenderLayer.getTextBackground());
+        // 血条图层：POSITION_COLOR 格式（位置+颜色），支持半透明，适合手绘四边形
+        VertexConsumer bar = consumers.getBuffer(RenderLayer.getDebugQuads());
 
         for (Entity entity : client.world.getEntities()) {
             if (!(entity instanceof LivingEntity living)) {
@@ -94,7 +98,7 @@ public class HealthDisplayFeature {
             matrices.scale(-0.022f, -0.022f, 0.022f);
             Matrix4f m = matrices.peek().getPositionMatrix();
 
-            // ===== 血条本体（TEXT_BACKGROUND 层，与文字同一管线）=====
+            // ===== 血条本体（DEBUG_QUADS 层：POSITION_COLOR，支持半透明）=====
             float halfW = cfg.healthBarWidth / 2.0f;
             float halfH = 3.6f;
 
@@ -109,7 +113,7 @@ public class HealthDisplayFeature {
             float b = (color & 0xFF) / 255.0f;
             quad(bar, m, -halfW, -halfH, -halfW + fillW, halfH, r, g, b, 1.0f);
 
-            // ===== 文字（同一 consumers）=====
+            // ===== 文字 =====
             // 名字：血条上方居中
             String name = living.getDisplayName().getString();
             float nameW = textRenderer.getWidth(name);
@@ -157,13 +161,13 @@ public class HealthDisplayFeature {
         return true;
     }
 
-    /** 血条矩形（POSITION_COLOR_LIGHT 格式，与文字背景层一致） */
+    /** 彩色矩形（DEBUG_QUADS / POSITION_COLOR 格式：位置 + 颜色，无需光照与纹理） */
     private static void quad(VertexConsumer consumer, Matrix4f matrix,
                              float x0, float y0, float x1, float y1,
                              float r, float g, float b, float a) {
-        consumer.vertex(matrix, x0, y0, 0.0f).color(r, g, b, a).light(FULL_LIGHT).next();
-        consumer.vertex(matrix, x0, y1, 0.0f).color(r, g, b, a).light(FULL_LIGHT).next();
-        consumer.vertex(matrix, x1, y1, 0.0f).color(r, g, b, a).light(FULL_LIGHT).next();
-        consumer.vertex(matrix, x1, y0, 0.0f).color(r, g, b, a).light(FULL_LIGHT).next();
+        consumer.vertex(matrix, x0, y0, 0.0f).color(r, g, b, a).next();
+        consumer.vertex(matrix, x0, y1, 0.0f).color(r, g, b, a).next();
+        consumer.vertex(matrix, x1, y1, 0.0f).color(r, g, b, a).next();
+        consumer.vertex(matrix, x1, y0, 0.0f).color(r, g, b, a).next();
     }
 }

@@ -59,8 +59,8 @@ public class HealthDisplayFeature {
         EntityRenderDispatcher dispatcher = client.getEntityRenderDispatcher();
         Font font = client.font;
 
-        // 血条图层：与文字背景同一层
-        VertexConsumer bar = consumers.getBuffer(RenderType.textBackground());
+        // 血条图层：POSITION_COLOR 格式（位置+颜色），支持半透明，适合手绘四边形
+        VertexConsumer bar = consumers.getBuffer(RenderType.debugQuads());
 
         for (Entity entity : client.level.entitiesForRendering()) {
             if (!(entity instanceof LivingEntity living)) {
@@ -158,13 +158,13 @@ public class HealthDisplayFeature {
         return true;
     }
 
-    /** 血条矩形（POSITION_COLOR_LIGHT 格式，与文字背景层一致） */
+    /** 彩色矩形（DEBUG_QUADS / POSITION_COLOR 格式：位置 + 颜色，无需光照与纹理） */
     private static void quad(VertexConsumer consumer, Matrix4f matrix,
                              float x0, float y0, float x1, float y1,
                              float r, float g, float b, float a) {
-        consumer.vertex(matrix, x0, y0, 0.0f).color(r, g, b, a).uv2(FULL_LIGHT).endVertex();
-        consumer.vertex(matrix, x0, y1, 0.0f).color(r, g, b, a).uv2(FULL_LIGHT).endVertex();
-        consumer.vertex(matrix, x1, y1, 0.0f).color(r, g, b, a).uv2(FULL_LIGHT).endVertex();
-        consumer.vertex(matrix, x1, y0, 0.0f).color(r, g, b, a).uv2(FULL_LIGHT).endVertex();
+        consumer.vertex(matrix, x0, y0, 0.0f).color(r, g, b, a).endVertex();
+        consumer.vertex(matrix, x0, y1, 0.0f).color(r, g, b, a).endVertex();
+        consumer.vertex(matrix, x1, y1, 0.0f).color(r, g, b, a).endVertex();
+        consumer.vertex(matrix, x1, y0, 0.0f).color(r, g, b, a).endVertex();
     }
 }

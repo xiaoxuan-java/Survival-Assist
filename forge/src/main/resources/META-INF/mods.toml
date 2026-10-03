@@ -10,3 +10,32 @@ displayName="${mod_name}"
 authors="${mod_authors}"
 logoFile="assets/survivalassist/icon.png"
 description='''${mod_description}'''
+
+# ---------------------------------------------------------------------------
+# 依赖声明
+# ---------------------------------------------------------------------------
+# Minecraft 自身
+[[dependencies.${mod_id}]]
+modId="forge"
+type="required"
+versionRange="[47,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="minecraft"
+type="required"
+versionRange="[1.20.1,1.21)"
+ordering="NONE"
+side="BOTH"
+
+# Cloth Config 为「可选」依赖：
+# 未安装时 Mod 主体功能照常运行，仅模组列表中的「配置」按钮不会被注册
+# （代码侧由 ConfigScreenFactorySafe 做反射探测，不会崩溃）。
+[[dependencies.${mod_id}]]
+modId="cloth_config"
+type="optional"
+versionRange="[11.0.0,)"
+ordering="AFTER"
+side="CLIENT"
+

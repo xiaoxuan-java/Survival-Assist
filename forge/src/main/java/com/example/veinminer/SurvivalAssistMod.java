@@ -1,7 +1,7 @@
 package com.example.veinminer;
 
+import com.example.veinminer.config.ConfigScreenFactorySafe;
 import com.example.veinminer.config.ModConfig;
-import com.example.veinminer.config.ModConfigScreen;
 import com.example.veinminer.feature.AutoExitFeature;
 import com.example.veinminer.feature.AutoFishFeature;
 import com.example.veinminer.feature.AutoMiningFeature;
@@ -74,11 +74,15 @@ public class SurvivalAssistMod {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         modBus.addListener(this::registerKeys);
 
-        // 配置屏幕（替代 ModMenu）
-        ModLoadingContext.get().registerExtensionPoint(
-                ConfigScreenHandler.ConfigScreenFactory.class,
-                () -> new ConfigScreenHandler.ConfigScreenFactory(
-                        (mc, parent) -> ModConfigScreen.create(parent)));
+        // 配置屏幕：仅在 Cloth Config 存在时注册。
+        // 直接引用 ModConfigScreen 会在缺少 Cloth Config 时抛 NoClassDefFoundError，
+        // 因此改用 ConfigScreenFactorySafe 做隔离探测 + 反射调用。
+        if (ConfigScreenFactorySafe.isClothConfigAvailable()) {
+            ModLoadingContext.get().registerExtensionPoint(
+                    ConfigScreenHandler.ConfigScreenFactory.class,
+                    () -> new ConfigScreenHandler.ConfigScreenFactory(
+                            (mc, parent) -> ConfigScreenFactorySafe.create(parent)));
+        }
 
         // 各功能初始化（Forge 版大多为空方法，保留接口一致性）
         HealthDisplayFeature.init();

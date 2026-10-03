@@ -1,13 +1,17 @@
 package com.example.veinminer.feature;
 
 import com.example.veinminer.config.ModConfig;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
@@ -29,8 +33,21 @@ public class HealthDisplayFeature {
     /**
      * 在世界渲染阶段（AFTER_ENTITIES）绘制头顶血条。
      *
-     * 血条使用与文字背景完全相同的渲染层 RenderType.textBackground()，
-     * 与文字一起提交到同一个 bufferSource、统一 flush、同一深度行为。
+     * 血条使用独立的 Tesselator buffer 立即绘制：
+     *   Tesselator tesselator = Tesselator.getInstance();
+     *   BufferBuilder buffer = tesselator.getBuilder();
+     *   buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+     *   ... 写入顶点 ...
+     *   tesselator.end();
+     *
+     * 不共用 bufferSource 的共享 BufferBuilder：
+     * 共享 buffer 可能已被同阶段其它渲染占用（currentElementId != 0），
+     * 此时 endVertex()/next() 会抛
+     * "Not filled all elements of the vertex" 导致游戏崩溃。
+     * 自己 begin() 的独立 buffer 初始状态干净，写入顺序完全可控。
+     *
+     * 顶点格式 POSITION_COLOR = 位置 + 颜色（两个元素），
+     * 每个顶点只需 vertex(...).color(...).endVertex()。
      */
     public static void render(RenderLevelStageEvent event) {
         ModConfig cfg = ModConfig.get();
@@ -59,8 +76,15 @@ public class HealthDisplayFeature {
         EntityRenderDispatcher dispatcher = client.getEntityRenderDispatcher();
         Font font = client.font;
 
-        // 血条图层：POSITION_COLOR 格式（位置+颜色），支持半透明，适合手绘四边形
-        VertexConsumer bar = consumers.getBuffer(RenderType.debugQuads());
+        // ===== 血条：独立 buffer 立即绘制 =====
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.depthMask(false);
+        RenderSystem.disableCull();
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+
+        Tesselator tesselator = Tesselator.getInstance();
+        BufferBuilder buffer = tesselator.getBuilder();
 
         for (Entity entity : client.level.entitiesForRendering()) {
             if (!(entity instanceof LivingEntity living)) {
@@ -93,22 +117,60 @@ public class HealthDisplayFeature {
             matrices.scale(-0.022f, -0.022f, 0.022f);
             Matrix4f m = matrices.last().pose();
 
-            // ===== 血条本体（TEXT_BACKGROUND 层，与文字同一管线）=====
+            // 每个实体一段 buffer：begin -> 写入 -> end
+            buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+
             float halfW = cfg.healthBarWidth / 2.0f;
             float halfH = 3.6f;
 
-            // 背景条
-            quad(bar, m, -halfW, -halfH, halfW, halfH, 0.0f, 0.0f, 0.0f, 0.6f);
-            // 前景条（绿->黄->红）
+            // 背景条（半透明黑）
+            quad(buffer, m, -halfW, -halfH, halfW, halfH, 0.0f, 0.0f, 0.0f, 0.6f);
+            // 前景条（血量比例，绿->黄->红）
             float fillW = halfW * 2.0f * ratio;
             int color = ratio > 0.5f ? 0xFF00E000
                     : (ratio > 0.25f ? 0xFFFFCC00 : 0xFFFF2200);
             float r = ((color >> 16) & 0xFF) / 255.0f;
             float g = ((color >> 8) & 0xFF) / 255.0f;
             float b = (color & 0xFF) / 255.0f;
-            quad(bar, m, -halfW, -halfH, -halfW + fillW, halfH, r, g, b, 1.0f);
+            quad(buffer, m, -halfW, -halfH, -halfW + fillW, halfH, r, g, b, 1.0f);
 
-            // ===== 文字（同一 consumers）=====
+            tesselator.end();
+            matrices.popPose();
+        }
+
+        // 恢复渲染状态
+        RenderSystem.enableCull();
+        RenderSystem.depthMask(true);
+        RenderSystem.disableBlend();
+
+        // ===== 文字（走共享 consumers，在血条之后绘制）=====
+        for (Entity entity : client.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living)) {
+                continue;
+            }
+            if (living == client.player) {
+                continue;
+            }
+            if (!living.isAlive() || living.isRemoved()) {
+                continue;
+            }
+            if (living.distanceToSqr(client.player) > cfg.healthDisplayRange * cfg.healthDisplayRange) {
+                continue;
+            }
+
+            Vec3 lerped = living.getPosition(tickDelta);
+            Vec3 anchor = lerped.add(0.0, living.getBbHeight() + 0.35, 0.0);
+            if (!isVisible(client, camPos, anchor)) {
+                continue;
+            }
+
+            float halfH = 3.6f;
+            matrices.pushPose();
+            matrices.translate(anchor.x - camPos.x, anchor.y - camPos.y, anchor.z - camPos.z);
+            matrices.mulPose(dispatcher.cameraOrientation());
+            matrices.scale(-0.022f, -0.022f, 0.022f);
+            Matrix4f m = matrices.last().pose();
+
             // 名字：血条上方居中
             String name = living.getDisplayName().getString();
             float nameW = font.width(name);
@@ -127,7 +189,7 @@ public class HealthDisplayFeature {
             matrices.popPose();
         }
 
-        // 本阶段结束统一 flush（与 Fabric consumers 一致）
+        // 本阶段结束统一 flush
         consumers.endBatch();
     }
 
@@ -158,13 +220,13 @@ public class HealthDisplayFeature {
         return true;
     }
 
-    /** 彩色矩形（DEBUG_QUADS / POSITION_COLOR 格式：位置 + 颜色，无需光照与纹理） */
-    private static void quad(VertexConsumer consumer, Matrix4f matrix,
+    /** 彩色矩形（POSITION_COLOR 格式：位置 + 颜色，无需光照与纹理） */
+    private static void quad(BufferBuilder buffer, Matrix4f matrix,
                              float x0, float y0, float x1, float y1,
                              float r, float g, float b, float a) {
-        consumer.vertex(matrix, x0, y0, 0.0f).color(r, g, b, a).endVertex();
-        consumer.vertex(matrix, x0, y1, 0.0f).color(r, g, b, a).endVertex();
-        consumer.vertex(matrix, x1, y1, 0.0f).color(r, g, b, a).endVertex();
-        consumer.vertex(matrix, x1, y0, 0.0f).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x0, y0, 0.0f).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x0, y1, 0.0f).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x1, y1, 0.0f).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x1, y0, 0.0f).color(r, g, b, a).endVertex();
     }
 }

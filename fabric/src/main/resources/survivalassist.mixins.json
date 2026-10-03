@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.example.veinminer.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "LightmapTextureManagerMixin",
+    "FishingBobberEntityAccessor",
+    "BlockRenderManagerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

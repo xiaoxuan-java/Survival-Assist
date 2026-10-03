@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.example.veinminer.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "survivalassist.refmap.json",
+  "client": [
+    "LightTextureMixin",
+    "LightTextureAccessor",
+    "FishingHookAccessor",
+    "BlockRenderDispatcherMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
